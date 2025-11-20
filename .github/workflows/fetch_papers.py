@@ -220,7 +220,16 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
     query = f"cat:cs.* AND submittedDate:[{two_days_ago_str}0000 TO {two_days_ago_str}2359]"
 
     # Search arXiv using the non-deprecated API
-    client = arxiv.Client()
+    # IMPORTANT: ArXiv API Terms of Use require:
+    # - 3 seconds between requests
+    # - Single connection at a time
+    # See: https://info.arxiv.org/help/api/tou.html#rate-limits
+    client = arxiv.Client(
+        page_size=100,      # Fetch 100 results per page (default)
+        delay_seconds=3.0,  # Required: 3 seconds between API requests
+        num_retries=5       # Retry on failures (429, 503, etc.)
+    )
+
     search = arxiv.Search(
         query=query,
         max_results=500,  # ArXiv can have 100-300 CS papers per day
@@ -228,6 +237,7 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
         sort_order=arxiv.SortOrder.Descending
     )
 
+    print(f"   ⏱️  Fetching with 3-second delay between requests (arXiv API requirement)...")
     papers = list(client.results(search))
     stats['fetched'] = len(papers)
 
