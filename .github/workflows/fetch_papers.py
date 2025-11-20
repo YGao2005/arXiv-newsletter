@@ -224,11 +224,18 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
     # - 3 seconds between requests
     # - Single connection at a time
     # See: https://info.arxiv.org/help/api/tou.html#rate-limits
+    #
+    # Note: ArXiv may have undocumented hourly/daily limits.
+    # If hitting 429/503 errors, wait until midnight UTC for limit reset.
     client = arxiv.Client(
         page_size=100,      # Fetch 100 results per page (default)
-        delay_seconds=3.0,  # Required: 3 seconds between API requests
-        num_retries=5       # Retry on failures (429, 503, etc.)
+        delay_seconds=5.0,  # 5 seconds between requests (more conservative than required 3s)
+        num_retries=3       # Reduce retries to avoid hammering on rate limits
     )
+
+    # Add initial delay to avoid any burst detection
+    print(f"   ⏸️  Initial 5-second delay to respect rate limits...")
+    time.sleep(5)
 
     search = arxiv.Search(
         query=query,
