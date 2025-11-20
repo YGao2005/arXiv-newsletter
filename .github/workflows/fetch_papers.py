@@ -149,29 +149,27 @@ def save_paper(paper_data: Dict) -> bool:
 
 def fetch_arxiv_papers() -> List[arxiv.Result]:
     """
-    Fetch recent papers from arXiv (last 3 days)
-    Note: ArXiv has indexing delays, so we fetch a few days back to ensure results
-    The duplicate check will prevent reprocessing papers we've already seen
+    Fetch papers from arXiv from 2 days ago (yesterday's announcements)
+
+    ArXiv publishes papers at midnight UTC AFTER they are announced.
+    - Papers announced on Day N appear in API on Day N+1 at midnight
+    - So when this runs at 08:00 UTC, we fetch papers from 2 days ago
+    - This gives us "yesterday's announcements" for a true daily newsletter
     """
-    # Calculate date range for last 3 days (to handle ArXiv indexing delays)
-    today = datetime.utcnow()
-    three_days_ago = today - timedelta(days=3)
+    # Fetch papers from 2 days ago (the most recent available at 08:00 UTC)
+    two_days_ago = datetime.utcnow() - timedelta(days=2)
+    two_days_ago_str = two_days_ago.strftime('%Y%m%d')
 
-    today_str = today.strftime('%Y%m%d')
-    three_days_ago_str = three_days_ago.strftime('%Y%m%d')
+    print(f"📅 Fetching papers from {two_days_ago_str} (yesterday's announcements)...")
 
-    print(f"📅 Fetching papers from {three_days_ago_str} to {today_str}...")
-    print(f"   (Will only process NEW papers published in last 1-2 days)")
-
-    # Build arXiv query
-    # Query for Computer Science papers submitted in the last 3 days
-    query = f"cat:cs.* AND submittedDate:[{three_days_ago_str}0000 TO {today_str}2359]"
+    # Build arXiv query for Computer Science papers from that specific day
+    query = f"cat:cs.* AND submittedDate:[{two_days_ago_str}0000 TO {two_days_ago_str}2359]"
 
     # Search arXiv using the non-deprecated API
     client = arxiv.Client()
     search = arxiv.Search(
         query=query,
-        max_results=300,  # Fetch more since we'll filter by date
+        max_results=500,  # ArXiv can have 100-300 CS papers per day
         sort_by=arxiv.SortCriterion.SubmittedDate,
         sort_order=arxiv.SortOrder.Descending
     )
@@ -179,14 +177,9 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
     papers = list(client.results(search))
     stats['fetched'] = len(papers)
 
-    # Filter to only papers published in the last 1-2 days for daily newsletter
-    cutoff_date = datetime.utcnow() - timedelta(days=2)
-    recent_papers = [p for p in papers if p.published >= cutoff_date]
+    print(f"✓ Fetched {len(papers)} papers from {two_days_ago_str}")
 
-    print(f"✓ Fetched {len(papers)} papers from arXiv")
-    print(f"   → Filtering to {len(recent_papers)} papers from last 1-2 days")
-
-    return recent_papers
+    return papers
 
 
 def process_papers(papers: List[arxiv.Result]):

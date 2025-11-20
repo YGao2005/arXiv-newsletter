@@ -2,7 +2,8 @@ name: Daily ArXiv Paper Fetch
 
 on:
   schedule:
-    # Run every day at 08:00 UTC (3 AM EST, 12 AM PST)
+    # Run every day at 08:00 UTC (after midnight when ArXiv API updates)
+    # This fetches papers from 2 days ago = yesterday's announcements
     - cron: '0 8 * * *'
   workflow_dispatch: # Allow manual triggering for testing
 
