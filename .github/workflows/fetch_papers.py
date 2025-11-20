@@ -149,27 +149,29 @@ def save_paper(paper_data: Dict) -> bool:
 
 def fetch_arxiv_papers() -> List[arxiv.Result]:
     """
-    Fetch recent papers from arXiv (last 7 days)
-    Note: ArXiv has indexing delays, so we fetch the last week to ensure results
+    Fetch recent papers from arXiv (last 3 days)
+    Note: ArXiv has indexing delays, so we fetch a few days back to ensure results
+    The duplicate check will prevent reprocessing papers we've already seen
     """
-    # Calculate date range for last 7 days
+    # Calculate date range for last 3 days (to handle ArXiv indexing delays)
     today = datetime.utcnow()
-    week_ago = today - timedelta(days=7)
+    three_days_ago = today - timedelta(days=3)
 
     today_str = today.strftime('%Y%m%d')
-    week_ago_str = week_ago.strftime('%Y%m%d')
+    three_days_ago_str = three_days_ago.strftime('%Y%m%d')
 
-    print(f"📅 Fetching papers from {week_ago_str} to {today_str}...")
+    print(f"📅 Fetching papers from {three_days_ago_str} to {today_str}...")
+    print(f"   (Will only process NEW papers published in last 1-2 days)")
 
     # Build arXiv query
-    # Query for Computer Science papers submitted in the last 7 days
-    query = f"cat:cs.* AND submittedDate:[{week_ago_str}0000 TO {today_str}2359]"
+    # Query for Computer Science papers submitted in the last 3 days
+    query = f"cat:cs.* AND submittedDate:[{three_days_ago_str}0000 TO {today_str}2359]"
 
     # Search arXiv using the non-deprecated API
     client = arxiv.Client()
     search = arxiv.Search(
         query=query,
-        max_results=200,  # Limit to 200 to avoid hitting rate limits
+        max_results=300,  # Fetch more since we'll filter by date
         sort_by=arxiv.SortCriterion.SubmittedDate,
         sort_order=arxiv.SortOrder.Descending
     )
@@ -177,8 +179,14 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
     papers = list(client.results(search))
     stats['fetched'] = len(papers)
 
+    # Filter to only papers published in the last 1-2 days for daily newsletter
+    cutoff_date = datetime.utcnow() - timedelta(days=2)
+    recent_papers = [p for p in papers if p.published >= cutoff_date]
+
     print(f"✓ Fetched {len(papers)} papers from arXiv")
-    return papers
+    print(f"   → Filtering to {len(recent_papers)} papers from last 1-2 days")
+
+    return recent_papers
 
 
 def process_papers(papers: List[arxiv.Result]):
@@ -200,11 +208,12 @@ def process_papers(papers: List[arxiv.Result]):
                 stats['duplicates'] += 1
                 continue
 
-            # Prepare text for embedding
-            embed_text = f"{paper.title}: {paper.summary}"
+            # Prepare text for embedding (abstract only - no need for full paper)
+            # We use title + abstract for better semantic search
+            embed_text = f"{paper.title}. {paper.summary}"
 
-            # Get embedding
-            print(f"   🧠 Generating embedding...")
+            # Get embedding (384-dim vector from abstract)
+            print(f"   🧠 Generating embedding from abstract...")
             embedding = get_embedding(embed_text)
             if not embedding:
                 print(f"   ⚠️  Skipping due to embedding error")

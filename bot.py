@@ -73,27 +73,42 @@ class ArxivBot(commands.Bot):
     async def post_papers_task(self):
         """
         Background task that runs every hour to check for new papers to post
+        Smart posting logic:
+        - Post all papers with score >= 9 (exceptional)
+        - If no 9+ papers, post top 1-3 papers of the day (score >= 7)
         """
         try:
             if not self.feed_channel:
                 print("⚠️  Feed channel not set, skipping post check")
                 return
 
-            print(f"\n🔍 Checking for unposted papers (score >= {MIN_IMPACT_SCORE})...")
+            print(f"\n🔍 Checking for unposted papers...")
 
-            # Query Supabase for unposted high-impact papers
+            # First, try to get exceptional papers (9+)
             response = supabase.rpc(
                 'arxiv_get_unposted_papers',
-                {'min_impact_score': MIN_IMPACT_SCORE}
+                {'min_impact_score': 9}
             ).execute()
 
             papers = response.data
 
-            if not papers:
-                print("   No new papers to post")
-                return
+            if papers:
+                print(f"   Found {len(papers)} exceptional paper(s) (score 9+) to post")
+            else:
+                # No 9+ papers, get top 3 papers of the day (score >= 7)
+                print("   No exceptional papers, fetching top papers of the day...")
+                response = supabase.rpc(
+                    'arxiv_get_unposted_papers',
+                    {'min_impact_score': MIN_IMPACT_SCORE}
+                ).execute()
 
-            print(f"   Found {len(papers)} paper(s) to post")
+                papers = response.data[:3] if response.data else []  # Limit to top 3
+
+                if papers:
+                    print(f"   Found {len(papers)} top paper(s) of the day to post")
+                else:
+                    print("   No new papers to post")
+                    return
 
             # Post each paper
             for paper in papers:
