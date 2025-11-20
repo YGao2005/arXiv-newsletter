@@ -149,27 +149,32 @@ def save_paper(paper_data: Dict) -> bool:
 
 def fetch_arxiv_papers() -> List[arxiv.Result]:
     """
-    Fetch papers from arXiv submitted yesterday
+    Fetch recent papers from arXiv (last 7 days)
+    Note: ArXiv has indexing delays, so we fetch the last week to ensure results
     """
-    # Calculate yesterday's date range
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    date_str = yesterday.strftime('%Y%m%d')
+    # Calculate date range for last 7 days
+    today = datetime.utcnow()
+    week_ago = today - timedelta(days=7)
 
-    print(f"📅 Fetching papers submitted on {date_str}...")
+    today_str = today.strftime('%Y%m%d')
+    week_ago_str = week_ago.strftime('%Y%m%d')
+
+    print(f"📅 Fetching papers from {week_ago_str} to {today_str}...")
 
     # Build arXiv query
-    # Query for Computer Science papers submitted yesterday
-    query = f"cat:cs.* AND submittedDate:[{date_str}0000 TO {date_str}2359]"
+    # Query for Computer Science papers submitted in the last 7 days
+    query = f"cat:cs.* AND submittedDate:[{week_ago_str}0000 TO {today_str}2359]"
 
-    # Search arXiv
+    # Search arXiv using the non-deprecated API
+    client = arxiv.Client()
     search = arxiv.Search(
         query=query,
-        max_results=200,  # Increased from 100 to capture more papers
+        max_results=200,  # Limit to 200 to avoid hitting rate limits
         sort_by=arxiv.SortCriterion.SubmittedDate,
         sort_order=arxiv.SortOrder.Descending
     )
 
-    papers = list(search.results())
+    papers = list(client.results(search))
     stats['fetched'] = len(papers)
 
     print(f"✓ Fetched {len(papers)} papers from arXiv")
