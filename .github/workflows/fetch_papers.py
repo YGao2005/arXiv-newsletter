@@ -65,60 +65,77 @@ def get_embedding(text: str) -> Optional[List[float]]:
         return None
 
 
-def analyze_with_gemini(title: str, abstract: str) -> Optional[Dict]:
+def analyze_papers_batch(papers_batch: List[tuple]) -> Dict[str, Optional[Dict]]:
     """
-    Use Gemini to analyze paper and return structured data
+    Analyze multiple papers in a single Gemini API call for efficiency
+    papers_batch: List of (arxiv_id, title, abstract) tuples
+    Returns: Dict mapping arxiv_id to analysis dict
     """
-    prompt = f"""You are a HIGHLY CRITICAL reviewer evaluating computer science research papers. Be strict and discriminating in your scoring.
+    if not papers_batch:
+        return {}
 
+    # Build batch prompt
+    prompt = """You are a HIGHLY CRITICAL reviewer evaluating computer science research papers. Be strict and discriminating in your scoring.
+
+SCORING RUBRIC (use the FULL range):
+
+10 = REVOLUTIONARY (e.g., Transformers, ResNet, AlphaGo, GANs when first introduced)
+    - Fundamentally changes how we approach a major problem
+    - Will be cited 1000+ times and spawn entire research directions
+    - Once-in-a-decade breakthrough
+
+9 = EXCEPTIONAL (major conference best paper caliber)
+   - Significant theoretical advance or empirical breakthrough
+   - Solves a long-standing important problem
+   - Introduces genuinely novel approach with broad applicability
+
+7-8 = STRONG (top-tier conference accept)
+     - Clear novel contribution with solid experimental validation
+     - Advances state-of-art meaningfully
+     - Well-executed work that others will build upon
+
+5-6 = SOLID (acceptable conference paper)
+     - Incremental but valid contribution
+     - Competent execution, some novelty
+     - Niche application or modest improvement
+
+3-4 = WEAK (borderline or reject)
+     - Minor variation of existing work
+     - Limited novelty or significance
+     - Narrow scope or questionable evaluation
+
+1-2 = POOR (clear reject)
+     - No significant contribution
+     - Fundamental flaws or already well-known
+
+DEFAULT ASSUMPTION: Most papers are incremental = 4-6 range. Only score 8+ if you see clear evidence of major impact.
+
+Analyze each paper below and return a JSON array with one object per paper:
+
+"""
+
+    # Add each paper to the prompt
+    for i, (arxiv_id, title, abstract) in enumerate(papers_batch):
+        prompt += f"""
+Paper {i+1} (ID: {arxiv_id}):
 Title: {title}
+Abstract: {abstract[:800]}{"..." if len(abstract) > 800 else ""}
 
-Abstract: {abstract}
+"""
 
-Provide a JSON response with these fields:
+    prompt += """
+Return ONLY a valid JSON array in this exact format:
+[
+  {"paper_id": "<arxiv_id>", "score": <number>, "tldr": "<string>", "tags": ["<tag1>", "<tag2>", ...]},
+  ...
+]
 
-1. "score": An integer from 1-10 indicating impact and significance. BE CRITICAL - most papers should score 4-6.
-
-   SCORING RUBRIC (use the FULL range):
-
-   10 = REVOLUTIONARY (e.g., Transformers, ResNet, AlphaGo, GANs when first introduced)
-       - Fundamentally changes how we approach a major problem
-       - Will be cited 1000+ times and spawn entire research directions
-       - Once-in-a-decade breakthrough
-
-   9 = EXCEPTIONAL (major conference best paper caliber)
-      - Significant theoretical advance or empirical breakthrough
-      - Solves a long-standing important problem
-      - Introduces genuinely novel approach with broad applicability
-
-   7-8 = STRONG (top-tier conference accept)
-        - Clear novel contribution with solid experimental validation
-        - Advances state-of-art meaningfully
-        - Well-executed work that others will build upon
-
-   5-6 = SOLID (acceptable conference paper)
-        - Incremental but valid contribution
-        - Competent execution, some novelty
-        - Niche application or modest improvement
-
-   3-4 = WEAK (borderline or reject)
-        - Minor variation of existing work
-        - Limited novelty or significance
-        - Narrow scope or questionable evaluation
-
-   1-2 = POOR (clear reject)
-        - No significant contribution
-        - Fundamental flaws or already well-known
-
-   DEFAULT ASSUMPTION: Most papers are incremental = 4-6 range. Only score 8+ if you see clear evidence of major impact.
-
-2. "tldr": A single concise sentence (max 150 chars) summarizing the key contribution
-
-3. "tags": An array of 2-5 relevant category tags from this list:
-   ["CV", "NLP", "LLM", "Transformers", "Diffusion", "RL", "Robotics", "ML", "Theory", "Systems", "Security", "Other"]
-
-Return ONLY valid JSON in this exact format:
-{{"score": <number>, "tldr": "<string>", "tags": [<strings>]}}"""
+For each paper provide:
+- "paper_id": The exact arxiv_id shown above
+- "score": Integer 1-10 (BE CRITICAL - most should be 4-6)
+- "tldr": Single concise sentence (max 150 chars) summarizing key contribution
+- "tags": Array of 2-5 tags from: ["CV", "NLP", "LLM", "Transformers", "Diffusion", "RL", "Robotics", "ML", "Theory", "Systems", "Security", "Other"]
+"""
 
     try:
         response = gemini_model.generate_content(prompt)
@@ -133,22 +150,30 @@ Return ONLY valid JSON in this exact format:
         elif '```' in text:
             text = text.split('```')[1].split('```')[0].strip()
 
-        # Parse JSON
-        data = json.loads(text)
+        # Parse JSON array
+        analyses = json.loads(text)
 
-        # Validate structure
-        if not all(k in data for k in ['score', 'tldr', 'tags']):
-            raise ValueError("Missing required fields in Gemini response")
+        if not isinstance(analyses, list):
+            raise ValueError("Expected JSON array from Gemini")
 
-        # Ensure score is in valid range
-        data['score'] = max(1, min(10, int(data['score'])))
+        # Convert to dict mapping arxiv_id to analysis
+        results = {}
+        for analysis in analyses:
+            if 'paper_id' in analysis and all(k in analysis for k in ['score', 'tldr', 'tags']):
+                paper_id = analysis['paper_id']
+                results[paper_id] = {
+                    'score': max(1, min(10, int(analysis['score']))),
+                    'tldr': analysis['tldr'],
+                    'tags': analysis['tags']
+                }
 
-        return data
+        return results
 
     except Exception as e:
-        print(f"⚠️  Error analyzing with Gemini: {e}")
+        print(f"⚠️  Error analyzing batch with Gemini: {e}")
         print(f"   Response: {response.text if 'response' in locals() else 'N/A'}")
-        return None
+        # Return empty dict - caller will handle defaults
+        return {}
 
 
 def check_paper_exists(arxiv_id: str) -> bool:
@@ -213,80 +238,103 @@ def fetch_arxiv_papers() -> List[arxiv.Result]:
 
 def process_papers(papers: List[arxiv.Result]):
     """
-    Process each paper: check duplicates, generate embeddings, analyze with Gemini
+    Process papers in batches: generate embeddings, analyze with Gemini in batches
     """
-    print(f"\n🔄 Processing {len(papers)} papers...")
+    BATCH_SIZE = 10  # Process 10 papers per Gemini call
+    print(f"\n🔄 Processing {len(papers)} papers in batches of {BATCH_SIZE}...")
 
-    for i, paper in enumerate(papers, 1):
-        try:
+    # Filter out papers that already exist
+    papers_to_process = []
+    for paper in papers:
+        arxiv_id = paper.entry_id.split('/abs/')[-1]
+        if check_paper_exists(arxiv_id):
+            stats['duplicates'] += 1
+        else:
+            papers_to_process.append(paper)
+
+    print(f"   📝 {len(papers_to_process)} new papers to process ({stats['duplicates']} duplicates skipped)")
+
+    # Process in batches
+    for batch_start in range(0, len(papers_to_process), BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, len(papers_to_process))
+        batch_papers = papers_to_process[batch_start:batch_end]
+        batch_num = (batch_start // BATCH_SIZE) + 1
+        total_batches = (len(papers_to_process) + BATCH_SIZE - 1) // BATCH_SIZE
+
+        print(f"\n📦 Batch {batch_num}/{total_batches} ({len(batch_papers)} papers)")
+
+        # Step 1: Generate embeddings for all papers in batch
+        print(f"   🧠 Generating embeddings...")
+        papers_with_embeddings = []
+        for paper in batch_papers:
             arxiv_id = paper.entry_id.split('/abs/')[-1]
-
-            # Progress indicator
-            print(f"\n[{i}/{len(papers)}] Processing: {arxiv_id}")
-
-            # Check if already processed
-            if check_paper_exists(arxiv_id):
-                print(f"   ⏭️  Already exists, skipping")
-                stats['duplicates'] += 1
-                continue
-
-            # Prepare text for embedding (abstract only - no need for full paper)
-            # We use title + abstract for better semantic search
             embed_text = f"{paper.title}. {paper.summary}"
-
-            # Get embedding (384-dim vector from abstract)
-            print(f"   🧠 Generating embedding from abstract...")
             embedding = get_embedding(embed_text)
-            if not embedding:
-                print(f"   ⚠️  Skipping due to embedding error")
-                continue
 
-            # Analyze with Gemini
-            print(f"   ✨ Analyzing with Gemini...")
-            analysis = analyze_with_gemini(paper.title, paper.summary)
+            if embedding:
+                papers_with_embeddings.append((paper, arxiv_id, embedding))
+            else:
+                print(f"      ⚠️  Failed embedding for {arxiv_id}, skipping")
+                stats['errors'] += 1
 
-            # Rate limit for Gemini (15 calls/min, 250k tokens/min, 1000 calls/day)
-            # Wait 4.5 seconds between calls = ~13 calls/min (safely under limit)
-            if analysis:  # Only sleep if we actually made a Gemini call
-                time.sleep(4.5)
+        if not papers_with_embeddings:
+            print(f"   ⚠️  No valid embeddings in this batch, skipping")
+            continue
 
-            if not analysis:
-                # Use defaults if Gemini fails
-                analysis = {
+        # Step 2: Analyze all papers in batch with single Gemini call
+        print(f"   ✨ Analyzing {len(papers_with_embeddings)} papers with Gemini...")
+        batch_for_gemini = [(arxiv_id, paper.title, paper.summary) for paper, arxiv_id, _ in papers_with_embeddings]
+        analyses = analyze_papers_batch(batch_for_gemini)
+
+        # Rate limit: 4.5 seconds between batch calls
+        time.sleep(4.5)
+
+        # Step 3: Save papers to database
+        print(f"   💾 Saving to database...")
+        for paper, arxiv_id, embedding in papers_with_embeddings:
+            try:
+                # Get analysis or use defaults
+                analysis = analyses.get(arxiv_id, {
                     'score': 5,
                     'tldr': paper.title[:150],
                     'tags': ['Other']
+                })
+
+                # Extract authors
+                authors = [author.name for author in paper.authors]
+
+                # Prepare paper data
+                paper_data = {
+                    'arxiv_id': arxiv_id,
+                    'title': paper.title,
+                    'abstract': paper.summary,
+                    'authors': authors,
+                    'published_at': paper.published.isoformat(),
+                    'url': paper.entry_id,
+                    'impact_score': analysis['score'],
+                    'summary': analysis['tldr'],
+                    'tags': analysis['tags'],
+                    'embedding': embedding,
+                    'posted_to_discord': False
                 }
 
-            # Extract authors
-            authors = [author.name for author in paper.authors]
+                # Save to database
+                if save_paper(paper_data):
+                    stats['new'] += 1
+                else:
+                    stats['errors'] += 1
 
-            # Prepare paper data
-            paper_data = {
-                'arxiv_id': arxiv_id,
-                'title': paper.title,
-                'abstract': paper.summary,
-                'authors': authors,
-                'published_at': paper.published.isoformat(),
-                'url': paper.entry_id,
-                'impact_score': analysis['score'],
-                'summary': analysis['tldr'],
-                'tags': analysis['tags'],
-                'embedding': embedding,
-                'posted_to_discord': False
-            }
+            except Exception as e:
+                print(f"      ❌ Error saving {arxiv_id}: {e}")
+                stats['errors'] += 1
 
-            # Save to database
-            if save_paper(paper_data):
-                print(f"   ✓ Saved (Score: {analysis['score']}/10)")
-                stats['new'] += 1
-            else:
-                print(f"   ❌ Failed to save")
-
-        except Exception as e:
-            print(f"   ❌ Error processing paper: {e}")
-            stats['errors'] += 1
-            continue
+        print(f"   ✓ Batch complete - saved {len(papers_with_embeddings)} papers")
+        score_summary = {}
+        for arxiv_id in analyses:
+            score = analyses[arxiv_id]['score']
+            score_summary[score] = score_summary.get(score, 0) + 1
+        if score_summary:
+            print(f"      Score distribution: {dict(sorted(score_summary.items()))}")
 
 
 def print_summary():
