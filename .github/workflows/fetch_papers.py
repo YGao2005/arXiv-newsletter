@@ -33,7 +33,7 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY, HF_EMBED_API_URL]):
 # Initialize clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # Statistics
 stats = {
