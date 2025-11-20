@@ -1,0 +1,40 @@
+name: Daily ArXiv Paper Fetch
+
+on:
+  schedule:
+    # Run every day at 08:00 UTC (3 AM EST, 12 AM PST)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Allow manual triggering for testing
+
+jobs:
+  fetch-papers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r .github/workflows/requirements.txt
+
+      - name: Fetch and process papers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HF_EMBED_API_URL: ${{ secrets.HF_EMBED_API_URL }}
+        run: |
+          python .github/workflows/fetch_papers.py
+
+      - name: Report results
+        if: always()
+        run: |
+          echo "Job completed. Check logs for details."
