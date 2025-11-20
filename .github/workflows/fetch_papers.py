@@ -69,19 +69,48 @@ def analyze_with_gemini(title: str, abstract: str) -> Optional[Dict]:
     """
     Use Gemini to analyze paper and return structured data
     """
-    prompt = f"""Analyze this research paper and provide a JSON response with the following fields:
+    prompt = f"""You are a HIGHLY CRITICAL reviewer evaluating computer science research papers. Be strict and discriminating in your scoring.
 
 Title: {title}
 
 Abstract: {abstract}
 
-Provide:
-1. "score": An integer from 1-10 indicating the paper's potential impact and significance
-   - 10: Groundbreaking, likely to change the field
-   - 8-9: Very significant contribution with novel insights
-   - 6-7: Solid work with notable contributions
-   - 4-5: Incremental improvement or niche application
-   - 1-3: Limited novelty or impact
+Provide a JSON response with these fields:
+
+1. "score": An integer from 1-10 indicating impact and significance. BE CRITICAL - most papers should score 4-6.
+
+   SCORING RUBRIC (use the FULL range):
+
+   10 = REVOLUTIONARY (e.g., Transformers, ResNet, AlphaGo, GANs when first introduced)
+       - Fundamentally changes how we approach a major problem
+       - Will be cited 1000+ times and spawn entire research directions
+       - Once-in-a-decade breakthrough
+
+   9 = EXCEPTIONAL (major conference best paper caliber)
+      - Significant theoretical advance or empirical breakthrough
+      - Solves a long-standing important problem
+      - Introduces genuinely novel approach with broad applicability
+
+   7-8 = STRONG (top-tier conference accept)
+        - Clear novel contribution with solid experimental validation
+        - Advances state-of-art meaningfully
+        - Well-executed work that others will build upon
+
+   5-6 = SOLID (acceptable conference paper)
+        - Incremental but valid contribution
+        - Competent execution, some novelty
+        - Niche application or modest improvement
+
+   3-4 = WEAK (borderline or reject)
+        - Minor variation of existing work
+        - Limited novelty or significance
+        - Narrow scope or questionable evaluation
+
+   1-2 = POOR (clear reject)
+        - No significant contribution
+        - Fundamental flaws or already well-known
+
+   DEFAULT ASSUMPTION: Most papers are incremental = 4-6 range. Only score 8+ if you see clear evidence of major impact.
 
 2. "tldr": A single concise sentence (max 150 chars) summarizing the key contribution
 
@@ -216,10 +245,10 @@ def process_papers(papers: List[arxiv.Result]):
             print(f"   ✨ Analyzing with Gemini...")
             analysis = analyze_with_gemini(paper.title, paper.summary)
 
-            # Rate limit for Gemini (15 requests/minute on free tier)
-            if stats['gemini_calls'] % 10 == 0:
-                print(f"   ⏸️  Rate limit pause (10 requests)...")
-                time.sleep(5)
+            # Rate limit for Gemini (15 calls/min, 250k tokens/min, 1000 calls/day)
+            # Wait 4.5 seconds between calls = ~13 calls/min (safely under limit)
+            if analysis:  # Only sleep if we actually made a Gemini call
+                time.sleep(4.5)
 
             if not analysis:
                 # Use defaults if Gemini fails
